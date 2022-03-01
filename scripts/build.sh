@@ -17,8 +17,13 @@ export OPENSSL_LOCAL_CONFIG_DIR="${SCRIPT_DIR}/../config"
 DEVELOPER=$(xcode-select --print-path)
 
 export IPHONEOS_DEPLOYMENT_VERSION="7.0"
+export TVOS_DEPLOYMENT_VERSION="11.0"
+
 IPHONEOS_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 IPHONESIMULATOR_SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+TVOS_SDK=$(xcrun --sdk appletvos --show-sdk-path)
+TVSIMULATOR_SDK=$(xcrun --sdk appletvsimulator --show-sdk-path)
+
 OSX_SDK=$(xcrun --sdk macosx --show-sdk-path)
 
 export MACOSX_DEPLOYMENT_TARGET="10.10" # 
@@ -45,6 +50,12 @@ configure() {
       iPhoneSimulator)
 	 SDK="${IPHONESIMULATOR_SDK}"
 	 ;;
+      tvOS)
+	 SDK="${TVOS_SDK}"
+	 ;;
+      tvSimulator)
+	 SDK="${TVSIMULATOR_SDK}"
+	 ;;
       MacOSX)
 	 SDK="${OSX_SDK}"
 	 ;;
@@ -66,6 +77,7 @@ configure() {
       exit 2
    fi
    
+   echo CROSS ROOT: ${CROSS_TOP}/SDKs/${CROSS_SDK}
 
    if [ "$OS" == "MacOSX" ]; then
       ${SRC_DIR}/Configure macos-$ARCH no-asm no-shared --prefix="${PREFIX}" &> "${PREFIX}.config.log"
@@ -75,6 +87,11 @@ configure() {
       ${SRC_DIR}/Configure ios-sim-cross-$ARCH no-asm no-shared --prefix="${PREFIX}" &> "${PREFIX}.config.log"
    elif [ "$OS" == "iPhoneOS" ]; then
       ${SRC_DIR}/Configure ios-cross-$ARCH no-asm no-shared --prefix="${PREFIX}" &> "${PREFIX}.config.log"
+   elif [ "$OS" == "tvSimulator" ]; then
+      ${SRC_DIR}/Configure tvos-sim-cross-$ARCH no-asm no-shared no-tests --prefix="${PREFIX}" &> "${PREFIX}.config.log"
+   elif [ "$OS" == "tvOS" ]; then
+      ${SRC_DIR}/Configure tvos-cross-$ARCH no-asm no-shared no-tests --prefix="${PREFIX}" &> "${PREFIX}.config.log"
+
    fi
 }
 
@@ -104,8 +121,8 @@ build()
 
    LOG_PATH="${PREFIX}.build.log"
    echo "Building ${LOG_PATH}"
-   make &> ${LOG_PATH}
-   make install &> ${LOG_PATH}
+   make -j8 &> ${LOG_PATH} 
+   make install_sw install_ssldirs &> ${LOG_PATH}
    cd ${BASE_PWD}
 
    # Add arch to library
@@ -185,6 +202,35 @@ build_ios() {
 
    rm -rf ${TMP_BUILD_DIR}
 }
+
+
+build_tvos() {
+   local TMP_BUILD_DIR=$( mktemp -d )
+
+   # Clean up whatever was left from our previous build
+   rm -rf "${SCRIPT_DIR}"/../{appletvsimulator/include,appletvsimulator/lib}
+   mkdir -p "${SCRIPT_DIR}"/../{appletvsimulator/include,appletvsimulator/lib}
+
+   build "arm64" "tvSimulator" ${TMP_BUILD_DIR} "appletvsimulator"
+   build "x86_64" "tvSimulator" ${TMP_BUILD_DIR} "appletvsimulator"
+
+   rm -rf "${SCRIPT_DIR}"/../{appletvos/include,appletvos/lib}
+   mkdir -p "${SCRIPT_DIR}"/../{appletvos/include,appletvos/lib}
+
+   build "arm64" "tvOS" ${TMP_BUILD_DIR} "appletvos"
+
+   # Copy headers
+
+   ditto "${TMP_BUILD_DIR}/${OPENSSL_VERSION}-tvSimulator-arm64/include/openssl" "${SCRIPT_DIR}/../appletvsimulator/include/openssl"
+   cp -f "${SCRIPT_DIR}/../shim/shim.h" "${SCRIPT_DIR}/../appletvsimulator/include/openssl/shim.h"
+
+
+   ditto "${TMP_BUILD_DIR}/${OPENSSL_VERSION}-tvOs-arm64/include/openssl" "${SCRIPT_DIR}/../appletvos/include/openssl"
+   cp -f "${SCRIPT_DIR}/../shim/shim.h" "${SCRIPT_DIR}/../appletvos/include/openssl/shim.h"
+
+   rm -rf ${TMP_BUILD_DIR}
+}
+
 
 build_macos() {
    local TMP_BUILD_DIR=$( mktemp -d )
@@ -271,5 +317,6 @@ if [ ! -f "${SCRIPT_DIR}/../openssl-${OPENSSL_VERSION}.tar.gz" ]; then
 fi
 
 build_ios
-build_macos
-build_catalyst
+build_tvos
+#build_macos
+#build_catalyst
